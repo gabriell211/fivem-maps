@@ -38,9 +38,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          & $env:BLENDER_BIN --command extension repo-add mapforge_sollumz --name "Sollumz" --url "https://repo.sollumz.org/"
+          & $env:BLENDER_BIN --online-mode --command extension repo-add mapforge_sollumz --name "Sollumz" --url "https://repo.sollumz.org/"
           if ($LASTEXITCODE -ne 0) { throw "Failed to add Sollumz repository" }
-          & $env:BLENDER_BIN --command extension install -s -e sollumz
+          & $env:BLENDER_BIN --online-mode --command extension install -s -e sollumz
           if ($LASTEXITCODE -ne 0) { throw "Failed to install Sollumz" }
 
       - name: Verify Sollumz and native provider
@@ -59,7 +59,7 @@ jobs:
           if not deps.IS_SZIO_NATIVE_AVAILABLE:
               raise RuntimeError(deps.PYMATERIA_REQUIRED_MSG or 'Native provider unavailable')
           '@
-          & $env:BLENDER_BIN --background --python-expr $expr
+          & $env:BLENDER_BIN --online-mode --background --python-expr $expr
           if ($LASTEXITCODE -ne 0) { throw "Sollumz native provider is unavailable" }
 
       - name: Export smoke SceneSpec to native FiveM resource
@@ -67,7 +67,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $out = "$env:RUNNER_TEMP\map-forge-output"
-          & $env:BLENDER_BIN --background --python "worker\export_scene.py" -- "worker\fixtures\smoke.scene.json" $out
+          & $env:BLENDER_BIN --online-mode --background --python "worker\export_scene.py" -- "worker\fixtures\smoke.scene.json" $out
           if ($LASTEXITCODE -ne 0) { throw "Blender/Sollumz export failed" }
           $stream = Join-Path $out "fivem_resource\stream"
           foreach ($ext in @(".ydr", ".ytyp", ".ymap")) {
