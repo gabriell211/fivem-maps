@@ -1,6 +1,6 @@
 export type WorkerConfig = {
   url: string;
-  headers: HeadersInit;
+  headers: Record<string, string>;
 };
 
 export function getWorkerConfig(): WorkerConfig | null {
