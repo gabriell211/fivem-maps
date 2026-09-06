@@ -1,6 +1,7 @@
 const SLOYD_BASE_URL = "https://api.sloyd.ai/api";
 
 export type SloydStatus = "pending" | "running" | "success" | "error";
+export type SloydTextureResolution = "1k" | "2k" | "4k";
 
 export type SloydJob = {
   id: string;
@@ -42,15 +43,33 @@ async function parseError(response: Response): Promise<string> {
   return `Sloyd respondeu HTTP ${response.status}.`;
 }
 
+function textureResolution(): SloydTextureResolution {
+  const value = process.env.SLOYD_TEXTURE_RESOLUTION?.trim().toLowerCase();
+  return value === "1k" || value === "4k" ? value : "2k";
+}
+
+function targetFaceCount(): number {
+  const parsed = Number.parseInt(process.env.SLOYD_TARGET_FACE_COUNT ?? "120000", 10);
+  if (!Number.isFinite(parsed)) return 120000;
+  return Math.max(20_000, Math.min(parsed, 450_000));
+}
+
 export async function createSloydTextTo3D(prompt: string): Promise<{ jobId: string }> {
+  const productionPrompt = [
+    prompt.trim(),
+    "Create a game-ready realistic GTA V / FiveM environment asset.",
+    "Fully textured exterior and requested visible interior details, clean UV mapping, realistic materials, architectural proportions, doors and windows with believable depth.",
+    "No floating geometry, no presentation pedestal, no text labels, no people, no vehicles unless explicitly requested.",
+  ].join(" ").slice(0, 4096);
+
   const response = await fetch(`${SLOYD_BASE_URL}/jobs/text-to-3d`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
-      prompt: prompt.slice(0, 4096),
+      prompt: productionPrompt,
       topology: "triangles",
-      targetFaceCount: 50000,
-      textureResolution: "1k",
+      targetFaceCount: targetFaceCount(),
+      textureResolution: textureResolution(),
       apiVersion: 1,
     }),
     cache: "no-store",
