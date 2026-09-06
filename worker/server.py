@@ -99,7 +99,7 @@ def run_export(job_id: str) -> None:
         with BLENDER_SEMAPHORE:
             write_status(job_id, "exporting", 50)
             process = subprocess.run(
-                [BLENDER, "--background", "--factory-startup", "--python", str(EXPORT_SCRIPT), "--", str(scene_path), str(output)],
+                [BLENDER, "--background", "--python", str(EXPORT_SCRIPT), "--", str(scene_path), str(output)],
                 capture_output=True,
                 text=True,
                 timeout=EXPORT_TIMEOUT_SECONDS,
@@ -146,7 +146,6 @@ def blender_readiness() -> tuple[bool, str]:
             [
                 BLENDER,
                 "--background",
-                "--factory-startup",
                 "--python-expr",
                 "import bpy; print('MAP_FORGE_SOLLUMZ=' + str(hasattr(bpy.ops, 'sollumz') and hasattr(bpy.ops.sollumz, 'export_assets')))",
             ],
@@ -188,9 +187,10 @@ def ready(_: None = Depends(require_token)) -> dict[str, Any]:
 
 @app.post("/v1/exports", status_code=202)
 def create_export(request: ExportRequest, _: None = Depends(require_token)) -> dict[str, Any]:
-    scene = request.scene.model_dump(mode="json")
-    if scene.get("sourceModel", {}).get("status") in {"pending", "running"}:
+    scene_model = request.scene
+    if scene_model.sourceModel and scene_model.sourceModel.status in {"pending", "running"}:
         raise HTTPException(status_code=409, detail="Modelo 3D ainda está sendo gerado.")
+    scene = scene_model.model_dump(mode="json")
 
     job_id = str(uuid.uuid4())
     directory = ROOT / job_id
