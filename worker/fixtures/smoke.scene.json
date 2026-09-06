@@ -19,6 +19,11 @@
       "collision": true
     }
   ],
+  "sourceModel": {
+    "provider": "sloyd",
+    "jobId": "smoke-test-model",
+    "status": "success"
+  },
   "metadata": {
     "estimatedEntities": 1,
     "estimatedDrawCalls": 1,
