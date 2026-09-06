@@ -173,7 +173,7 @@
   border-color: #61dff7;
   background: #61dff7;
   box-shadow: 0 0 14px rgba(97, 223, 247, .55);
-  animation: mapforge-pulse 1.35s ease-in-out infinite;
+  animation: mapforge-stage-pulse 1.35s ease-in-out infinite;
 }
 
 .toolbar-progress-value {
@@ -185,7 +185,7 @@
 .status-pill.working i {
   background: #61dff7;
   box-shadow: 0 0 12px rgba(97, 223, 247, .75);
-  animation: mapforge-pulse 1.35s ease-in-out infinite;
+  animation: mapforge-dot-pulse 1.35s ease-in-out infinite;
 }
 
 .status-pill.ready i {
@@ -206,9 +206,14 @@
   to { transform: rotate(-360deg); }
 }
 
-@keyframes mapforge-pulse {
+@keyframes mapforge-stage-pulse {
   0%, 100% { opacity: .55; transform: translateX(-50%) scale(.9); }
   50% { opacity: 1; transform: translateX(-50%) scale(1.18); }
+}
+
+@keyframes mapforge-dot-pulse {
+  0%, 100% { opacity: .55; transform: scale(.9); }
+  50% { opacity: 1; transform: scale(1.18); }
 }
 
 @media (prefers-reduced-motion: reduce) {
