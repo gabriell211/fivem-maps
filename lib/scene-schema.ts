@@ -17,7 +17,7 @@ export const SceneObjectSchema = v.object({
 });
 
 export const SourceModelSchema = v.object({
-  provider: v.picklist(["tripo", "sloyd"]),
+  provider: v.picklist(["tripo", "trellis", "sloyd"]),
   jobId: v.string(),
   status: v.picklist(["pending", "running", "success", "error"]),
   progress: v.optional(v.number()),
