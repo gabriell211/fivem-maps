@@ -23,6 +23,10 @@ body { min-width: 320px; }
 .ghost-button { padding: 9px 12px; color: #dbe7f3; background: #101a26; border: 1px solid #223247; }
 .primary-button { padding: 13px 16px; color: #041014; background: linear-gradient(135deg, #65dff7, #62f2a7); box-shadow: 0 9px 28px rgba(98, 242, 167, .13); }
 .primary-button:hover:not(:disabled), .ghost-button:hover:not(:disabled) { transform: translateY(-1px); }
+.export-control { position: relative; display: flex; align-items: center; }
+.export-control .primary-button { white-space: nowrap; }
+.export-link { display: inline-flex; align-items: center; text-decoration: none; white-space: nowrap; }
+.export-error { position: absolute; top: calc(100% + 7px); right: 0; z-index: 20; width: 270px; padding: 8px 10px; border: 1px solid #63313a; border-radius: 8px; color: #ffabb4; background: #241017; font-size: 10px; line-height: 1.35; box-shadow: 0 12px 30px rgba(0,0,0,.35); }
 .workspace { min-height: calc(100vh - 72px); display: grid; grid-template-columns: 390px minmax(0, 1fr); }
 .sidebar { border-right: 1px solid #142333; padding: 26px; background: linear-gradient(180deg, rgba(12, 23, 34, .96), rgba(6, 13, 21, .98)); overflow-y: auto; }
 .panel-heading h1 { margin: 8px 0 10px; font-size: 30px; line-height: 1.03; letter-spacing: -.04em; }
@@ -59,13 +63,16 @@ body { min-width: 320px; }
 .stat-row span, .muted { color: #6f8499; }
 .stat-row strong { color: #e3edf6; text-transform: capitalize; }
 .muted { margin: 12px 0 0; font-size: 12px; }
+@media (max-width: 1150px) {
+  .status-pill { display: none; }
+}
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 320px minmax(0, 1fr); }
   .pipeline-list { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 780px) {
-  .topbar { height: auto; min-height: 64px; padding: 12px 16px; }
-  .status-pill { display: none; }
+  .topbar { height: auto; min-height: 64px; padding: 12px 16px; align-items: flex-start; }
+  .topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
   .workspace { display: block; }
   .sidebar { border-right: 0; border-bottom: 1px solid #142333; }
   .canvas-column { min-height: 720px; }
