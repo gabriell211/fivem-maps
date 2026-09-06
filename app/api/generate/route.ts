@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { planScene } from "@/lib/planner";
+import { createSloydTextTo3D, isSloydConfigured } from "@/lib/sloyd";
 
 export const runtime = "nodejs";
 
@@ -11,11 +12,32 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const scene = planScene(body.prompt);
+
+    if (isSloydConfigured()) {
+      try {
+        const { jobId } = await createSloydTextTo3D(scene.prompt);
+        scene.sourceModel = {
+          provider: "sloyd",
+          jobId,
+          status: "pending",
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Falha ao iniciar geração 3D.";
+        scene.sourceModel = {
+          provider: "sloyd",
+          jobId: `failed-${scene.id.slice(0, 12)}`,
+          status: "error",
+          error: message,
+        };
+      }
+    }
+
     return NextResponse.json({
       job: {
-        id: scene.id,
-        status: "preview",
-        progress: 45,
+        id: scene.sourceModel?.jobId ?? scene.id,
+        status: scene.sourceModel?.status ?? "preview",
+        progress: scene.sourceModel ? 20 : 45,
+        provider: scene.sourceModel?.provider ?? "procedural",
       },
       scene,
     });
