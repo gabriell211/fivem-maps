@@ -165,6 +165,7 @@ export function planScene(prompt: string): SceneSpec {
     name: normalized.slice(0, 48),
     prompt: normalized,
     style: detectStyle(normalized),
+    worldPosition: [0, 0, 0],
     spawn: [0, -32, 1],
     objects,
     metadata: {
