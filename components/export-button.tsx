@@ -22,11 +22,13 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const modelReady = scene?.sourceModel?.status === "success";
   const modelStillGenerating = scene?.sourceModel?.status === "pending" || scene?.sourceModel?.status === "running";
+  const modelUnavailable = Boolean(scene) && !modelReady && !modelStillGenerating;
   const busy = state === "queued" || state === "exporting";
 
   async function startExport() {
-    if (!scene || modelStillGenerating) return;
+    if (!scene || !modelReady) return;
     setState("queued");
     setProgress(5);
     setDownloadUrl(null);
@@ -75,16 +77,22 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
   }
 
   const label = modelStillGenerating
-    ? "Aguardando modelo 3D"
-    : busy
-      ? `Exportando ${progress}%`
-      : scene?.sourceModel?.status === "error"
-        ? "Exportar fallback FiveM"
+    ? "Gerando modelo 3D..."
+    : modelUnavailable
+      ? "Modelo 3D necessário"
+      : busy
+        ? `Exportando ${progress}%`
         : "Gerar ZIP FiveM";
 
   return (
     <div className="export-control">
-      <button className="primary-button" type="button" onClick={startExport} disabled={!scene || busy || modelStillGenerating}>
+      <button
+        className="primary-button"
+        type="button"
+        onClick={startExport}
+        disabled={!scene || busy || !modelReady}
+        title={modelUnavailable ? "A exportação só é liberada depois que o modelo 3D real estiver pronto." : undefined}
+      >
         {label}
       </button>
       {error && <span className="export-error" title={error}>Falhou: {error}</span>}
