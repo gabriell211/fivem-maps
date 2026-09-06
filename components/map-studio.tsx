@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import type { SceneSpec } from "@/lib/scene-schema";
+import { ExportButton } from "./export-button";
 import { ScenePreview } from "./scene-preview";
 
 const EXAMPLES = [
@@ -70,11 +71,12 @@ export function MapStudio() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">V</div>
-          <div><strong>FiveM Map Forge</strong><span>AI + Sollumz pipeline</span></div>
+          <div><strong>FiveM Map Forge</strong><span>Text → Blender → Sollumz → FiveM</span></div>
         </div>
         <div className="topbar-actions">
-          <span className="status-pill"><i /> Blender Worker offline/local</span>
-          <button className="ghost-button" type="button" onClick={downloadScene} disabled={!scene}>Exportar SceneSpec</button>
+          <span className="status-pill"><i /> Worker configurável</span>
+          <button className="ghost-button" type="button" onClick={downloadScene} disabled={!scene}>Baixar SceneSpec</button>
+          <ExportButton scene={scene} />
         </div>
       </header>
 
@@ -83,7 +85,7 @@ export function MapStudio() {
           <div className="panel-heading">
             <span className="eyebrow">TEXT → FIVEM</span>
             <h1>Descreva. Gere. Veja. Exporte.</h1>
-            <p>A IA monta a estrutura do mapa e prepara a cena para Blender + Sollumz.</p>
+            <p>O sistema transforma sua descrição em uma cena 3D e prepara a exportação pelo Blender + Sollumz.</p>
           </div>
 
           <form onSubmit={generate} className="prompt-form">
@@ -133,9 +135,9 @@ export function MapStudio() {
               <div className="pipeline-list">
                 <span className="done">Scene planner</span>
                 <span className={scene ? "done" : ""}>3D preview</span>
-                <span>Sloyd/asset provider</span>
+                <span>Asset provider</span>
                 <span>Blender + Sollumz export</span>
-                <span>FiveM resource package</span>
+                <span>FiveM resource ZIP</span>
               </div>
             </div>
             <div className="stats-card">
