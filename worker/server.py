@@ -17,20 +17,21 @@ from pydantic import BaseModel, Field, field_validator
 
 ROOT = Path(os.getenv("MAP_FORGE_JOBS", "./jobs")).resolve()
 BLENDER = os.getenv("BLENDER_BIN", "blender")
-EXPORT_SCRIPT = Path(__file__).with_name("export_scene.py").resolve()
+EXPORT_SCRIPT = Path(__file__).with_name("export_scene_tripo.py").resolve()
 WORKER_TOKEN = os.getenv("MAP_FORGE_WORKER_TOKEN", "").strip()
 MAX_CONCURRENT = max(1, min(int(os.getenv("MAP_FORGE_MAX_CONCURRENT", "1")), 4))
 EXPORT_TIMEOUT_SECONDS = max(60, min(int(os.getenv("MAP_FORGE_EXPORT_TIMEOUT", "1200")), 3600))
 BLENDER_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT)
 ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="FiveM Map Forge Worker", version="0.3.2")
+app = FastAPI(title="FiveM Map Forge Worker", version="0.4.0")
 
 
 class SourceModel(BaseModel):
-    provider: Literal["sloyd"]
+    provider: Literal["tripo", "sloyd"]
     jobId: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     status: Literal["pending", "running", "success", "error"]
+    progress: int | None = Field(default=None, ge=0, le=100)
     url: str | None = None
     error: str | None = None
 
@@ -147,7 +148,7 @@ def blender_readiness() -> tuple[bool, str]:
     if not executable or not Path(executable).exists():
         return False, f"Blender não encontrado: {BLENDER}"
     if not EXPORT_SCRIPT.is_file():
-        return False, "export_scene.py ausente"
+        return False, "export_scene_tripo.py ausente"
 
     try:
         process = subprocess.run(
@@ -179,6 +180,7 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "version": app.version,
+        "provider": "tripo",
         "maxConcurrent": MAX_CONCURRENT,
         "jobsRoot": str(ROOT),
     }
@@ -190,7 +192,15 @@ def ready(_: None = Depends(require_token)) -> dict[str, Any]:
     ok, detail = blender_readiness()
     if not ok:
         raise HTTPException(status_code=503, detail=detail)
-    return {"ok": True, "blender": BLENDER, "sollumz": True, "checkedInMs": round((time.monotonic() - started) * 1000)}
+    if not os.getenv("TRIPO_API_KEY", "").strip():
+        raise HTTPException(status_code=503, detail="TRIPO_API_KEY não configurada no worker.")
+    return {
+        "ok": True,
+        "blender": BLENDER,
+        "sollumz": True,
+        "tripo": True,
+        "checkedInMs": round((time.monotonic() - started) * 1000),
+    }
 
 
 @app.post("/v1/exports", status_code=202)
@@ -209,6 +219,10 @@ def create_export(request: ExportRequest, _: None = Depends(require_token)) -> d
             status_code=409,
             detail="O modelo 3D real não está disponível. O worker não exporta fallback procedural como mapa final.",
         )
+    if source.provider != "tripo":
+        raise HTTPException(status_code=409, detail="Este worker está configurado para exportar modelos Tripo.")
+    if not os.getenv("TRIPO_API_KEY", "").strip():
+        raise HTTPException(status_code=503, detail="TRIPO_API_KEY não configurada no worker.")
 
     scene = scene_model.model_dump(mode="json")
     job_id = str(uuid.uuid4())
