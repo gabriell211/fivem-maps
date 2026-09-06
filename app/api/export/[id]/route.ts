@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getWorkerConfig } from "@/lib/worker";
 
 export const runtime = "nodejs";
 
@@ -6,13 +7,16 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const workerUrl = process.env.MAP_FORGE_WORKER_URL?.replace(/\/$/, "");
-  if (!workerUrl) {
+  const worker = getWorkerConfig();
+  if (!worker) {
     return NextResponse.json({ error: "MAP_FORGE_WORKER_URL não configurada." }, { status: 503 });
   }
 
   const { id } = await context.params;
-  const response = await fetch(`${workerUrl}/v1/exports/${encodeURIComponent(id)}`, { cache: "no-store" });
+  const response = await fetch(`${worker.url}/v1/exports/${encodeURIComponent(id)}`, {
+    cache: "no-store",
+    headers: worker.headers,
+  });
   const payload: unknown = await response.json();
 
   if (response.ok && payload && typeof payload === "object" && "status" in payload && payload.status === "ready") {
