@@ -28,6 +28,15 @@ type TripoTaskResponse = {
   };
 };
 
+type TripoBalanceResponse = {
+  code?: number;
+  message?: string;
+  data?: {
+    balance?: number;
+    frozen?: number;
+  };
+};
+
 function apiKey(): string | null {
   const value = process.env.TRIPO_API_KEY?.trim();
   return value || null;
@@ -75,6 +84,22 @@ function parseResponse(payload: TripoTaskResponse): TripoTaskResponse["data"] {
     throw new Error(payload.message?.trim() || `Tripo retornou código ${payload.code ?? "desconhecido"}.`);
   }
   return payload.data;
+}
+
+export async function getTripoBalance(): Promise<{ balance: number; frozen: number }> {
+  const response = await fetch(`${TRIPO_BASE_URL}/user/balance`, {
+    headers: headers(),
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as TripoBalanceResponse;
+  if (!response.ok || payload.code !== 0 || !payload.data) {
+    throw new Error(payload.message?.trim() || `Tripo respondeu HTTP ${response.status}.`);
+  }
+
+  return {
+    balance: Number(payload.data.balance ?? 0),
+    frozen: Number(payload.data.frozen ?? 0),
+  };
 }
 
 export async function createTripoTextTo3D(prompt: string): Promise<{ jobId: string }> {
