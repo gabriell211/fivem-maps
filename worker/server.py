@@ -24,7 +24,7 @@ EXPORT_TIMEOUT_SECONDS = max(60, min(int(os.getenv("MAP_FORGE_EXPORT_TIMEOUT", "
 BLENDER_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT)
 ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="FiveM Map Forge Worker", version="0.3.0")
+app = FastAPI(title="FiveM Map Forge Worker", version="0.3.1")
 
 
 class SourceModel(BaseModel):
@@ -196,10 +196,21 @@ def ready(_: None = Depends(require_token)) -> dict[str, Any]:
 @app.post("/v1/exports", status_code=202)
 def create_export(request: ExportRequest, _: None = Depends(require_token)) -> dict[str, Any]:
     scene_model = request.scene
-    if scene_model.sourceModel and scene_model.sourceModel.status in {"pending", "running"}:
+    source = scene_model.sourceModel
+    if source is None:
+        raise HTTPException(
+            status_code=409,
+            detail="A cena ainda é apenas um blockout. Gere o modelo 3D real antes de exportar.",
+        )
+    if source.status in {"pending", "running"}:
         raise HTTPException(status_code=409, detail="Modelo 3D ainda está sendo gerado.")
-    scene = scene_model.model_dump(mode="json")
+    if source.status != "success":
+        raise HTTPException(
+            status_code=409,
+            detail="O modelo 3D real não está disponível. O worker não exporta fallback procedural como mapa final.",
+        )
 
+    scene = scene_model.model_dump(mode="json")
     job_id = str(uuid.uuid4())
     directory = ROOT / job_id
     directory.mkdir(parents=True, exist_ok=False)
