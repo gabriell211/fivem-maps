@@ -88,7 +88,7 @@ export async function getSloydJob(jobId: string): Promise<SloydJob> {
     ? payload.errorMessage
     : undefined;
 
-  return { id: jobId, status, errorMessage };
+  return errorMessage ? { id: jobId, status, errorMessage } : { id: jobId, status };
 }
 
 export function getSloydModelUrl(jobId: string): string {
