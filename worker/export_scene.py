@@ -227,7 +227,7 @@ def create_ytyp(drawable: bpy.types.Object, name: str) -> None:
         raise RuntimeError("YTYP não foi registrado na cena.")
     ytyp = bpy.context.scene.ytyps[bpy.context.scene.ytyp_index]
     ytyp.name = name
-    bpy.context.scene.create_archetype_type = "BASE"
+    bpy.context.scene.create_archetype_type = "sollumz_archetype_base"
 
     bpy.ops.object.select_all(action="DESELECT")
     drawable.select_set(True)
