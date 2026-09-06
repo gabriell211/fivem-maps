@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { parseSceneSpec } from "@/lib/scene-schema";
+import { getWorkerConfig } from "@/lib/worker";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const workerUrl = process.env.MAP_FORGE_WORKER_URL?.replace(/\/$/, "");
-  if (!workerUrl) {
+  const worker = getWorkerConfig();
+  if (!worker) {
     return NextResponse.json({ error: "MAP_FORGE_WORKER_URL não configurada." }, { status: 503 });
   }
 
@@ -16,9 +17,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const scene = parseSceneSpec(body.scene);
-    const response = await fetch(`${workerUrl}/v1/exports`, {
+    if (scene.sourceModel && (scene.sourceModel.status === "pending" || scene.sourceModel.status === "running")) {
+      return NextResponse.json({ error: "O modelo 3D ainda está sendo gerado." }, { status: 409 });
+    }
+
+    const response = await fetch(`${worker.url}/v1/exports`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...worker.headers },
       body: JSON.stringify({ scene }),
       cache: "no-store",
     });
