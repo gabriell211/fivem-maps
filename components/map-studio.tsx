@@ -9,7 +9,7 @@ const EXAMPLES = [
   "Hospital moderno com estacionamento, recepção, corredores internos e iluminação externa",
   "Delegacia industrial com garagem, pátio cercado e estacionamento para viaturas",
   "Mansão de luxo com jardim, lago pequeno e entrada de vidro",
-  "Galpão abandonado com pátio, iluminação vermelha e área interna degradada",
+  "Igreja macabra grande com interior, altar, corredores laterais e iluminação sombria",
 ];
 
 const AXES = ["X", "Y", "Z"] as const;
@@ -19,25 +19,36 @@ type ModelPayload = {
   id?: string;
   status?: Exclude<ModelStatus, "idle">;
   progress?: number;
+  stage?: string;
   error?: string;
   modelUrl?: string;
   previewUrl?: string;
-  consumedCredit?: number;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-function generationCopy(progress: number): string {
-  if (progress < 8) return "Enviando sua descrição para o gerador 3D";
-  if (progress < 24) return "Interpretando arquitetura e proporções";
-  if (progress < 48) return "Gerando a geometria 3D";
-  if (progress < 70) return "Construindo detalhes do modelo";
-  if (progress < 90) return "Gerando UVs, materiais PBR e texturas";
+function generationCopy(progress: number, stage?: string): string {
+  if (stage) {
+    const labels: Record<string, string> = {
+      queued: "Aguardando GPU",
+      concept: "Criando referência visual a partir do seu texto",
+      shape: "Gerando a geometria 3D",
+      cleanup: "Limpando e otimizando a malha",
+      texture: "Gerando UVs, PBR e texturas",
+      export: "Empacotando o GLB final",
+      ready: "Carregando o preview 3D final",
+    };
+    if (labels[stage]) return labels[stage];
+  }
+  if (progress < 8) return "Preparando o job de geração";
+  if (progress < 25) return "Criando referência visual do mapa";
+  if (progress < 60) return "Gerando a geometria 3D";
+  if (progress < 85) return "Gerando materiais e texturas PBR";
   if (progress < 100) return "Finalizando o modelo texturizado";
   return "Carregando o preview 3D final";
 }
 
-function GenerationProgress({ progress }: { progress: number }) {
+function GenerationProgress({ progress, stage }: { progress: number; stage?: string }) {
   const normalized = Math.max(0, Math.min(100, Math.round(progress)));
 
   return (
@@ -49,19 +60,19 @@ function GenerationProgress({ progress }: { progress: number }) {
         <div className="generation-percent">{normalized}%</div>
       </div>
       <div className="generation-copy">
-        <span className="eyebrow">TRIPO • GERAÇÃO 3D</span>
-        <strong>{generationCopy(normalized)}</strong>
-        <p>A porcentagem vem do job real da Tripo. O viewer só aparece depois que o GLB/PBR final terminar de baixar no navegador.</p>
+        <span className="eyebrow">MAP FORGE AI • GERAÇÃO 3D</span>
+        <strong>{generationCopy(normalized, stage)}</strong>
+        <p>O processamento roda no nosso próprio pipeline. O viewer só aparece quando o GLB texturizado final estiver realmente disponível.</p>
       </div>
       <div className="generation-bar" aria-hidden="true">
         <div className="generation-bar-fill" style={{ width: `${normalized}%` }} />
       </div>
       <div className="generation-stage-row" aria-hidden="true">
         <span className={normalized >= 8 ? "done" : "active"}>Prompt</span>
-        <span className={normalized >= 24 ? "done" : normalized >= 8 ? "active" : ""}>Estrutura</span>
-        <span className={normalized >= 55 ? "done" : normalized >= 24 ? "active" : ""}>3D</span>
-        <span className={normalized >= 90 ? "done" : normalized >= 55 ? "active" : ""}>Texturas</span>
-        <span className={normalized === 100 ? "done" : normalized >= 90 ? "active" : ""}>Finalização</span>
+        <span className={normalized >= 25 ? "done" : normalized >= 8 ? "active" : ""}>Referência</span>
+        <span className={normalized >= 62 ? "done" : normalized >= 25 ? "active" : ""}>3D</span>
+        <span className={normalized >= 88 ? "done" : normalized >= 62 ? "active" : ""}>PBR + Texturas</span>
+        <span className={normalized === 100 ? "done" : normalized >= 88 ? "active" : ""}>Finalização</span>
       </div>
     </div>
   );
@@ -74,6 +85,7 @@ export function MapStudio() {
   const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
   const [modelPreviewUrl, setModelPreviewUrl] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationStage, setGenerationStage] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
@@ -95,32 +107,31 @@ export function MapStudio() {
 
   async function pollGeneratedModel(initialScene: SceneSpec): Promise<void> {
     const sourceModel = initialScene.sourceModel;
-    if (!sourceModel || sourceModel.provider !== "tripo") {
-      throw new Error("O motor Tripo não foi iniciado.");
+    if (!sourceModel || sourceModel.provider !== "mapforge") {
+      throw new Error("O Map Forge AI não foi iniciado.");
     }
-
     if (sourceModel.status === "error") {
-      throw new Error(sourceModel.error ?? "O motor Tripo está indisponível.");
+      throw new Error(sourceModel.error ?? "O Map Forge AI está indisponível.");
     }
 
     setModelStatus(sourceModel.status);
     setStatus("generating");
     setGenerationProgress(sourceModel.progress ?? 0);
+    setGenerationStage(sourceModel.stage);
 
-    for (let attempt = 0; attempt < 360; attempt += 1) {
+    for (let attempt = 0; attempt < 900; attempt += 1) {
       await sleep(2000);
       const response = await fetch(`/api/model/${encodeURIComponent(sourceModel.jobId)}`, { cache: "no-store" });
       const payload = (await response.json()) as ModelPayload;
 
-      if (!response.ok) throw new Error(payload.error ?? "Falha ao acompanhar a geração 3D na Tripo.");
+      if (!response.ok) throw new Error(payload.error ?? "Falha ao acompanhar o Map Forge AI.");
       const nextStatus = payload.status ?? "running";
       const nextProgress = Math.max(0, Math.min(100, Math.round(payload.progress ?? 0)));
       setModelStatus(nextStatus);
       setGenerationProgress(nextProgress);
+      setGenerationStage(payload.stage);
 
-      if (nextStatus === "success" && payload.modelUrl && payload.previewUrl) {
-        // Do not reveal the viewer at Tripo success alone. Fetch the final GLB first so
-        // the user never sees an empty canvas while a large model is still downloading.
+      if (nextStatus === "success" && payload.previewUrl) {
         const previewResponse = await fetch(payload.previewUrl, { cache: "no-store" });
         if (!previewResponse.ok) {
           throw new Error(`O modelo ficou pronto, mas o preview não pôde ser carregado (HTTP ${previewResponse.status}).`);
@@ -136,31 +147,34 @@ export function MapStudio() {
         setScene((current) => current ? {
           ...current,
           sourceModel: {
-            provider: "tripo",
+            provider: "mapforge",
             jobId: sourceModel.jobId,
             status: "success",
             progress: 100,
-            url: payload.modelUrl,
+            stage: "ready",
+            ...(payload.modelUrl ? { url: payload.modelUrl } : {}),
           },
         } : current);
 
         setGenerationProgress(100);
+        setGenerationStage("ready");
         setModelStatus("success");
         setStatus("ready");
         return;
       }
 
       if (nextStatus === "error") {
-        const message = payload.error ?? "A Tripo não conseguiu concluir o modelo.";
+        const message = payload.error ?? "O Map Forge AI não conseguiu concluir o modelo.";
         setModelStatus("error");
         setStatus("error");
         setScene((current) => current ? {
           ...current,
           sourceModel: {
-            provider: "tripo",
+            provider: "mapforge",
             jobId: sourceModel.jobId,
             status: "error",
             progress: nextProgress,
+            ...(payload.stage ? { stage: payload.stage } : {}),
             error: message,
           },
         } : current);
@@ -180,6 +194,7 @@ export function MapStudio() {
     clearPreviewUrl();
     setModelStatus("idle");
     setGenerationProgress(0);
+    setGenerationStage("queued");
     setStatus("planning");
 
     try {
@@ -198,11 +213,12 @@ export function MapStudio() {
 
       const generatedScene = payload.scene as SceneSpec;
       if (generatedScene.sourceModel?.status === "error") {
-        throw new Error(generatedScene.sourceModel.error ?? "A Tripo não está configurada.");
+        throw new Error(generatedScene.sourceModel.error ?? "O Map Forge AI não está configurado.");
       }
 
       setScene(generatedScene);
       setGenerationProgress(generatedScene.sourceModel?.progress ?? 0);
+      setGenerationStage(generatedScene.sourceModel?.stage);
       await pollGeneratedModel(generatedScene);
     } catch (cause) {
       setStatus("error");
@@ -218,11 +234,7 @@ export function MapStudio() {
     const value = Math.max(-10000, Math.min(10000, parsed));
     setScene((current) => {
       if (!current) return current;
-      const worldPosition: [number, number, number] = [
-        current.worldPosition[0],
-        current.worldPosition[1],
-        current.worldPosition[2],
-      ];
+      const worldPosition: [number, number, number] = [current.worldPosition[0], current.worldPosition[1], current.worldPosition[2]];
       worldPosition[axis] = value;
       return { ...current, worldPosition };
     });
@@ -244,7 +256,7 @@ export function MapStudio() {
   const providerLabel = isReady
     ? "Mapa 3D pronto"
     : isGenerating
-      ? `Tripo • ${Math.round(generationProgress)}%`
+      ? `Map Forge AI • ${Math.round(generationProgress)}%`
       : status === "error"
         ? "Geração interrompida"
         : "Pronto para gerar";
@@ -254,7 +266,7 @@ export function MapStudio() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">V</div>
-          <div><strong>FiveM Map Forge</strong><span>Tripo → Blender → Sollumz → FiveM</span></div>
+          <div><strong>FiveM Map Forge</strong><span>Map Forge AI → Blender → Sollumz → FiveM</span></div>
         </div>
         <div className="topbar-actions">
           <span className={`status-pill ${isReady ? "ready" : isGenerating ? "working" : status === "error" ? "failed" : ""}`}><i /> {providerLabel}</span>
@@ -272,7 +284,7 @@ export function MapStudio() {
           <div className="panel-heading">
             <span className="eyebrow">TEXT → FIVEM</span>
             <h1>Descreva. Gere. Veja. Exporte.</h1>
-            <p>O sistema gera o modelo completo e só revela o preview quando geometria, UVs, PBR e texturas estiverem prontos.</p>
+            <p>Nosso próprio pipeline gera referência, geometria, UVs, PBR e texturas antes de revelar o preview final.</p>
           </div>
 
           <form onSubmit={generate} className="prompt-form">
@@ -284,7 +296,7 @@ export function MapStudio() {
               rows={8}
               maxLength={1800}
               disabled={isGenerating}
-              placeholder="Ex.: hospital abandonado com estacionamento, corredores internos, recepção destruída e luz vermelha..."
+              placeholder="Ex.: igreja macabra enorme, nave interna, altar, corredores laterais, vitrais e iluminação sombria..."
             />
             <div className="prompt-meta"><span>{prompt.length}/1800</span><span>Português natural</span></div>
             <button className="primary-button" type="submit" disabled={isGenerating}>
@@ -333,14 +345,14 @@ export function MapStudio() {
           <div className="canvas-toolbar">
             <div>
               <span className="section-label">{isGenerating ? "PROCESSAMENTO" : "PREVIEW 3D"}</span>
-              <strong>{isReady ? scene?.name : isGenerating ? generationCopy(generationProgress) : "Nova cena"}</strong>
+              <strong>{isReady ? scene?.name : isGenerating ? generationCopy(generationProgress, generationStage) : "Nova cena"}</strong>
             </div>
             {isGenerating && <strong className="toolbar-progress-value">{Math.round(generationProgress)}%</strong>}
           </div>
 
           {isGenerating ? (
             <div className="preview-shell processing-shell">
-              <GenerationProgress progress={generationProgress} />
+              <GenerationProgress progress={generationProgress} stage={generationStage} />
             </div>
           ) : isReady ? (
             <ScenePreview scene={scene} modelUrl={modelPreviewUrl} />
@@ -349,7 +361,7 @@ export function MapStudio() {
               <div className="preview-empty">
                 <span className="eyebrow">PREVIEW 3D FINAL</span>
                 <strong>Seu mapa completo aparecerá aqui</strong>
-                <p>Durante a geração você verá apenas o progresso real da Tripo. Nenhum blockout ou geometria provisória será exibido.</p>
+                <p>Durante a geração você verá apenas o progresso do Map Forge AI. Nenhum blockout ou geometria provisória será exibido.</p>
               </div>
             </div>
           )}
@@ -359,8 +371,8 @@ export function MapStudio() {
               <div className="stat-card wide">
                 <span className="section-label">PIPELINE CONCLUÍDO</span>
                 <div className="pipeline-list">
-                  <span className="done">Planejamento</span>
-                  <span className="done">Modelo 3D</span>
+                  <span className="done">Texto → referência</span>
+                  <span className="done">Geometria 3D</span>
                   <span className="done">UV + PBR + texturas</span>
                   <span className="done">Preview final</span>
                   <span>Blender + Sollumz no export</span>
