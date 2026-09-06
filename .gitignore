@@ -5,6 +5,7 @@ out/
 .env.local
 *.log
 worker/jobs/
+.runtime/
 __pycache__/
 *.pyc
 .DS_Store
