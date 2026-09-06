@@ -17,9 +17,10 @@ export const SceneObjectSchema = v.object({
 });
 
 export const SourceModelSchema = v.object({
-  provider: v.literal("sloyd"),
+  provider: v.picklist(["tripo", "sloyd"]),
   jobId: v.string(),
   status: v.picklist(["pending", "running", "success", "error"]),
+  progress: v.optional(v.number()),
   url: v.optional(v.string()),
   error: v.optional(v.string()),
 });
