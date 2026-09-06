@@ -12,10 +12,23 @@ const EXAMPLES = [
   "Galpão abandonado com pátio, iluminação vermelha e área interna degradada",
 ];
 
+type ModelStatus = "idle" | "pending" | "running" | "success" | "error";
+type ModelPayload = {
+  id?: string;
+  status?: Exclude<ModelStatus, "idle">;
+  error?: string;
+  modelUrl?: string;
+  previewUrl?: string;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export function MapStudio() {
   const [prompt, setPrompt] = useState(EXAMPLES[0] ?? "");
   const [scene, setScene] = useState<SceneSpec | null>(null);
   const [status, setStatus] = useState<"idle" | "planning" | "preview" | "error">("idle");
+  const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
+  const [modelPreviewUrl, setModelPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
@@ -28,9 +41,65 @@ export function MapStudio() {
     ];
   }, [scene]);
 
+  async function pollGeneratedModel(initialScene: SceneSpec): Promise<void> {
+    const sourceModel = initialScene.sourceModel;
+    if (!sourceModel || sourceModel.provider !== "sloyd") {
+      setModelStatus("idle");
+      return;
+    }
+
+    if (sourceModel.status === "error") {
+      setModelStatus("error");
+      return;
+    }
+
+    setModelStatus(sourceModel.status);
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      await sleep(2000);
+      const response = await fetch(`/api/model/${encodeURIComponent(sourceModel.jobId)}`, { cache: "no-store" });
+      const payload = (await response.json()) as ModelPayload;
+
+      if (!response.ok) throw new Error(payload.error ?? "Falha ao acompanhar a geração 3D.");
+      const nextStatus = payload.status ?? "running";
+      setModelStatus(nextStatus);
+
+      if (nextStatus === "success" && payload.modelUrl && payload.previewUrl) {
+        setModelPreviewUrl(payload.previewUrl);
+        setScene((current) => current ? {
+          ...current,
+          sourceModel: {
+            provider: "sloyd",
+            jobId: sourceModel.jobId,
+            status: "success",
+            url: payload.modelUrl,
+          },
+        } : current);
+        return;
+      }
+
+      if (nextStatus === "error") {
+        setScene((current) => current ? {
+          ...current,
+          sourceModel: {
+            provider: "sloyd",
+            jobId: sourceModel.jobId,
+            status: "error",
+            error: payload.error ?? "O Sloyd não conseguiu gerar o modelo.",
+          },
+        } : current);
+        return;
+      }
+    }
+
+    setModelStatus("error");
+    throw new Error("A geração 3D excedeu o tempo máximo de acompanhamento.");
+  }
+
   async function generate(event?: FormEvent) {
     event?.preventDefault();
     setError(null);
+    setModelPreviewUrl(null);
+    setModelStatus("idle");
     setStatus("planning");
 
     try {
@@ -47,10 +116,12 @@ export function MapStudio() {
         throw new Error(message);
       }
 
-      setScene(payload.scene as SceneSpec);
+      const generatedScene = payload.scene as SceneSpec;
+      setScene(generatedScene);
       setStatus("preview");
+      await pollGeneratedModel(generatedScene);
     } catch (cause) {
-      setStatus("error");
+      setStatus((current) => current === "preview" ? "preview" : "error");
       setError(cause instanceof Error ? cause.message : "Falha inesperada.");
     }
   }
@@ -66,15 +137,23 @@ export function MapStudio() {
     URL.revokeObjectURL(url);
   }
 
+  const providerLabel = modelStatus === "success"
+    ? "Modelo IA pronto"
+    : modelStatus === "pending" || modelStatus === "running"
+      ? "Gerando modelo IA..."
+      : modelStatus === "error"
+        ? "IA indisponível • fallback procedural"
+        : "Preview procedural";
+
   return (
     <main className="studio">
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">V</div>
-          <div><strong>FiveM Map Forge</strong><span>Text → Blender → Sollumz → FiveM</span></div>
+          <div><strong>FiveM Map Forge</strong><span>Text → 3D → Blender → Sollumz → FiveM</span></div>
         </div>
         <div className="topbar-actions">
-          <span className="status-pill"><i /> Worker configurável</span>
+          <span className="status-pill"><i /> {providerLabel}</span>
           <button className="ghost-button" type="button" onClick={downloadScene} disabled={!scene}>Baixar SceneSpec</button>
           <ExportButton scene={scene} />
         </div>
@@ -99,8 +178,8 @@ export function MapStudio() {
               placeholder="Ex.: hospital abandonado com estacionamento, corredores internos, recepção destruída e luz vermelha..."
             />
             <div className="prompt-meta"><span>{prompt.length}/1800</span><span>Português natural</span></div>
-            <button className="primary-button" type="submit" disabled={status === "planning"}>
-              {status === "planning" ? "Planejando mapa..." : "Gerar mapa"}
+            <button className="primary-button" type="submit" disabled={status === "planning" || modelStatus === "pending" || modelStatus === "running"}>
+              {status === "planning" ? "Planejando mapa..." : modelStatus === "pending" || modelStatus === "running" ? "Gerando 3D..." : "Gerar mapa"}
             </button>
             {error && <p className="error-message" role="alert">{error}</p>}
           </form>
@@ -123,11 +202,12 @@ export function MapStudio() {
               <span className={status !== "idle" ? "active" : ""}>01 Prompt</span>
               <span className={status === "planning" || status === "preview" ? "active" : ""}>02 Planejamento</span>
               <span className={status === "preview" ? "active" : ""}>03 Preview</span>
-              <span>04 Sollumz</span>
+              <span className={modelStatus === "success" ? "active" : ""}>04 Modelo IA</span>
+              <span>05 Sollumz</span>
             </div>
           </div>
 
-          <ScenePreview scene={scene} />
+          <ScenePreview scene={scene} modelUrl={modelPreviewUrl} />
 
           <div className="bottom-grid">
             <div className="stat-card wide">
@@ -135,7 +215,7 @@ export function MapStudio() {
               <div className="pipeline-list">
                 <span className="done">Scene planner</span>
                 <span className={scene ? "done" : ""}>3D preview</span>
-                <span>Asset provider</span>
+                <span className={modelStatus === "success" ? "done" : ""}>Sloyd text-to-3D</span>
                 <span>Blender + Sollumz export</span>
                 <span>FiveM resource ZIP</span>
               </div>
