@@ -24,7 +24,7 @@ EXPORT_TIMEOUT_SECONDS = max(60, min(int(os.getenv("MAP_FORGE_EXPORT_TIMEOUT", "
 BLENDER_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT)
 ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="FiveM Map Forge Worker", version="0.3.1")
+app = FastAPI(title="FiveM Map Forge Worker", version="0.3.2")
 
 
 class SourceModel(BaseModel):
@@ -123,7 +123,7 @@ def run_export(job_id: str) -> None:
 
             resource = output / "fivem_resource"
             stream = resource / "stream"
-            required_extensions = {".ydr", ".ytyp", ".ymap"}
+            required_extensions = {".ydr", ".ytd", ".ytyp", ".ymap"}
             produced = {p.suffix.lower() for p in stream.glob("*") if p.is_file()} if stream.exists() else set()
             missing = sorted(required_extensions - produced)
             if missing:
