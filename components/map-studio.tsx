@@ -12,6 +12,7 @@ const EXAMPLES = [
   "Galpão abandonado com pátio, iluminação vermelha e área interna degradada",
 ];
 
+const AXES = ["X", "Y", "Z"] as const;
 type ModelStatus = "idle" | "pending" | "running" | "success" | "error";
 type ModelPayload = {
   id?: string;
@@ -126,6 +127,22 @@ export function MapStudio() {
     }
   }
 
+  function updateWorldPosition(axis: 0 | 1 | 2, rawValue: string): void {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    const value = Math.max(-10000, Math.min(10000, parsed));
+    setScene((current) => {
+      if (!current) return current;
+      const worldPosition: [number, number, number] = [
+        current.worldPosition[0],
+        current.worldPosition[1],
+        current.worldPosition[2],
+      ];
+      worldPosition[axis] = value;
+      return { ...current, worldPosition };
+    });
+  }
+
   function downloadScene() {
     if (!scene) return;
     const blob = new Blob([JSON.stringify(scene, null, 2)], { type: "application/json" });
@@ -183,6 +200,32 @@ export function MapStudio() {
             </button>
             {error && <p className="error-message" role="alert">{error}</p>}
           </form>
+
+          {scene && (
+            <div className="placement-card">
+              <div className="placement-heading">
+                <span className="section-label">POSIÇÃO NO GTA</span>
+                <small>Origem mundial do mapa</small>
+              </div>
+              <div className="coordinate-grid">
+                {AXES.map((axis, index) => (
+                  <label key={axis}>
+                    <span>{axis}</span>
+                    <input
+                      type="number"
+                      min={-10000}
+                      max={10000}
+                      step="0.1"
+                      value={scene.worldPosition[index]}
+                      onChange={(event) => updateWorldPosition(index as 0 | 1 | 2, event.target.value)}
+                      aria-label={`Coordenada ${axis} do mapa no GTA`}
+                    />
+                  </label>
+                ))}
+              </div>
+              <p>Use as coordenadas do local onde o mapa deve aparecer. A geometria continua local; o YMAP recebe esta transformação.</p>
+            </div>
+          )}
 
           <div className="example-list">
             <span className="section-label">EXEMPLOS RÁPIDOS</span>
