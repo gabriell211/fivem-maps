@@ -5,9 +5,11 @@ import { Canvas } from "@react-three/fiber";
 import { Bounds, Center, Grid, OrbitControls, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import type { SceneObject, SceneSpec } from "@/lib/scene-schema";
 
+const degToRad = (degrees: number) => degrees * Math.PI / 180;
+
 function Primitive({ item }: { item: SceneObject }) {
   const position: [number, number, number] = item.position;
-  const rotation: [number, number, number] = item.rotation;
+  const rotation: [number, number, number] = item.rotation.map(degToRad) as [number, number, number];
   const scale: [number, number, number] = item.scale;
 
   return (
