@@ -24,7 +24,7 @@ EXPORT_TIMEOUT_SECONDS = max(60, min(int(os.getenv("MAP_FORGE_EXPORT_TIMEOUT", "
 BLENDER_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT)
 ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="FiveM Map Forge Worker", version="0.2.0")
+app = FastAPI(title="FiveM Map Forge Worker", version="0.3.0")
 
 
 class SourceModel(BaseModel):
@@ -40,6 +40,7 @@ class SceneSpec(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     prompt: str = Field(min_length=1, max_length=4096)
     style: str = Field(min_length=1, max_length=40)
+    worldPosition: list[float] = Field(min_length=3, max_length=3)
     spawn: list[float] = Field(min_length=3, max_length=3)
     objects: list[dict[str, Any]] = Field(min_length=1, max_length=5000)
     sourceModel: SourceModel | None = None
@@ -51,6 +52,13 @@ class SceneSpec(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("Nome da cena vazio.")
+        return value
+
+    @field_validator("worldPosition", "spawn")
+    @classmethod
+    def validate_vec3(cls, value: list[float]) -> list[float]:
+        if any(not (-10000 <= coordinate <= 10000) for coordinate in value):
+            raise ValueError("Coordenadas fora do intervalo seguro -10000..10000.")
         return value
 
 
@@ -130,7 +138,7 @@ def run_export(job_id: str) -> None:
             write_status(job_id, "ready", 100)
     except subprocess.TimeoutExpired:
         write_status(job_id, "failed", 100, f"Blender excedeu o limite de {EXPORT_TIMEOUT_SECONDS}s.")
-    except Exception as exc:  # worker boundary: preserve error for the web client
+    except Exception as exc:
         write_status(job_id, "failed", 100, str(exc))
 
 
