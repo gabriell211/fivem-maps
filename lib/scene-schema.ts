@@ -29,6 +29,7 @@ export const SceneSpecSchema = v.object({
   name: v.string(),
   prompt: v.string(),
   style: v.picklist(["realistic", "modern", "industrial", "abandoned", "luxury", "rural", "custom"]),
+  worldPosition: Vec3Schema,
   spawn: Vec3Schema,
   objects: v.array(SceneObjectSchema),
   sourceModel: v.optional(SourceModelSchema),
