@@ -100,6 +100,7 @@ jobs:
           $fixtureScript = "$env:RUNNER_TEMP\build_smoke_glb.py"
           $glb = "$env:RUNNER_TEMP\smoke-textured.glb"
           Set-Content -Path $fixtureScript -Value $script -Encoding utf8
+          $env:SMOKE_GLB = $glb
           "SMOKE_GLB=$glb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $env:BLENDER_BIN --factory-startup --background --python $fixtureScript
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $glb)) { throw "Failed to build textured GLB fixture" }
