@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
+from mathutils import Vector
 
 MAX_MODEL_BYTES = 180 * 1024 * 1024
 SLOYD_MODEL_BASE = "https://storage.googleapis.com/ai-services-quality/jobs"
@@ -188,6 +189,53 @@ def join_meshes(meshes: list[bpy.types.Object], name: str) -> bpy.types.Object:
     return mesh
 
 
+def target_model_dimensions(scene: dict[str, Any]) -> tuple[float, float, float]:
+    objects = scene.get("objects", [])
+    candidates = [item for item in objects if item.get("kind") in {"building", "wall"}]
+    if not candidates:
+        candidates = [item for item in objects if item.get("kind") not in {"floor", "road", "water", "light"}]
+    if not candidates:
+        return (20.0, 20.0, 8.0)
+
+    mins = [float("inf"), float("inf"), float("inf")]
+    maxs = [float("-inf"), float("-inf"), float("-inf")]
+    for item in candidates:
+        position = [float(v) for v in item.get("position", [0, 0, 0])]
+        scale = [abs(float(v)) for v in item.get("scale", [1, 1, 1])]
+        for axis in range(3):
+            mins[axis] = min(mins[axis], position[axis] - scale[axis] * 0.5)
+            maxs[axis] = max(maxs[axis], position[axis] + scale[axis] * 0.5)
+    return tuple(max(0.25, maxs[axis] - mins[axis]) for axis in range(3))
+
+
+def normalize_generated_mesh(mesh: bpy.types.Object, scene: dict[str, Any]) -> None:
+    """Normalize arbitrary text-to-3D units to the planner's GTA-scale envelope."""
+    bpy.context.view_layer.objects.active = mesh
+    mesh.select_set(True)
+    bpy.context.view_layer.update()
+
+    source_dimensions = tuple(max(0.0001, abs(float(v))) for v in mesh.dimensions)
+    target_dimensions = target_model_dimensions(scene)
+    source_horizontal = max(source_dimensions[0], source_dimensions[1])
+    target_horizontal = max(target_dimensions[0], target_dimensions[1])
+    factor = max(0.001, min(target_horizontal / source_horizontal, 1000.0))
+
+    mesh.scale = tuple(float(component) * factor for component in mesh.scale)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    bpy.context.view_layer.update()
+
+    corners = [mesh.matrix_world @ Vector(corner) for corner in mesh.bound_box]
+    min_x = min(corner.x for corner in corners)
+    max_x = max(corner.x for corner in corners)
+    min_y = min(corner.y for corner in corners)
+    max_y = max(corner.y for corner in corners)
+    min_z = min(corner.z for corner in corners)
+    mesh.location.x -= (min_x + max_x) * 0.5
+    mesh.location.y -= (min_y + max_y) * 0.5
+    mesh.location.z -= min_z
+    bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+
+
 def prepare_materials(mesh: bpy.types.Object) -> None:
     if not mesh.data.materials:
         mesh.data.materials.append(material_for("generated", "#808080"))
@@ -235,6 +283,14 @@ def create_ytyp(drawable: bpy.types.Object, name: str) -> None:
     result = bpy.ops.sollumz.createarchetypefromselected()
     if "FINISHED" not in result or not ytyp.archetypes:
         raise RuntimeError("Falha ao criar archetype do Drawable no YTYP.")
+
+
+def apply_world_position(drawable: bpy.types.Object, scene: dict[str, Any]) -> None:
+    position = scene.get("worldPosition", [0, 0, 0])
+    if not isinstance(position, list) or len(position) != 3:
+        raise RuntimeError("worldPosition inválida.")
+    drawable.location = tuple(float(v) for v in position)
+    bpy.context.view_layer.update()
 
 
 def create_current_ymap(drawable: bpy.types.Object, name: str) -> None:
@@ -338,11 +394,15 @@ def export_scene(scene: dict[str, Any], output_dir: Path) -> None:
 
     source = scene.get("sourceModel")
     glb_path = download_sloyd_glb(source, output_dir) if isinstance(source, dict) else None
+    using_generated_model = glb_path is not None
     meshes = import_glb(glb_path) if glb_path else build_procedural_meshes(scene)
     mesh = join_meshes(meshes, name)
+    if using_generated_model:
+        normalize_generated_mesh(mesh, scene)
     prepare_materials(mesh)
     drawable = convert_to_drawable(mesh, name)
     create_ytyp(drawable, name)
+    apply_world_position(drawable, scene)
     create_current_ymap(drawable, name)
 
     blend_path = output_dir / f"{name}.blend"
@@ -362,7 +422,12 @@ def main() -> None:
     output_dir = Path(args[1]).resolve()
     with scene_path.open("r", encoding="utf-8") as handle:
         scene = json.load(handle)
-    if not isinstance(scene, dict) or not scene.get("name") or not isinstance(scene.get("objects"), list):
+    if (
+        not isinstance(scene, dict)
+        or not scene.get("name")
+        or not isinstance(scene.get("objects"), list)
+        or not isinstance(scene.get("worldPosition"), list)
+    ):
         raise RuntimeError("SceneSpec inválida.")
     export_scene(scene, output_dir)
 
