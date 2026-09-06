@@ -34,7 +34,7 @@ function generationCopy(progress: number): string {
   if (progress < 70) return "Construindo detalhes do modelo";
   if (progress < 90) return "Gerando UVs, materiais PBR e texturas";
   if (progress < 100) return "Finalizando o modelo texturizado";
-  return "Mapa 3D pronto";
+  return "Carregando o preview 3D final";
 }
 
 function GenerationProgress({ progress }: { progress: number }) {
@@ -51,7 +51,7 @@ function GenerationProgress({ progress }: { progress: number }) {
       <div className="generation-copy">
         <span className="eyebrow">TRIPO • GERAÇÃO 3D</span>
         <strong>{generationCopy(normalized)}</strong>
-        <p>A porcentagem vem do job real da Tripo. O preview só aparece quando o modelo PBR texturizado chegar a 100%.</p>
+        <p>A porcentagem vem do job real da Tripo. O viewer só aparece depois que o GLB/PBR final terminar de baixar no navegador.</p>
       </div>
       <div className="generation-bar" aria-hidden="true">
         <div className="generation-bar-fill" style={{ width: `${normalized}%` }} />
@@ -86,6 +86,13 @@ export function MapStudio() {
     ];
   }, [scene, status]);
 
+  function clearPreviewUrl(): void {
+    setModelPreviewUrl((current) => {
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+      return null;
+    });
+  }
+
   async function pollGeneratedModel(initialScene: SceneSpec): Promise<void> {
     const sourceModel = initialScene.sourceModel;
     if (!sourceModel || sourceModel.provider !== "tripo") {
@@ -112,7 +119,20 @@ export function MapStudio() {
       setGenerationProgress(nextProgress);
 
       if (nextStatus === "success" && payload.modelUrl && payload.previewUrl) {
-        setModelPreviewUrl(payload.previewUrl);
+        // Do not reveal the viewer at Tripo success alone. Fetch the final GLB first so
+        // the user never sees an empty canvas while a large model is still downloading.
+        const previewResponse = await fetch(payload.previewUrl, { cache: "no-store" });
+        if (!previewResponse.ok) {
+          throw new Error(`O modelo ficou pronto, mas o preview não pôde ser carregado (HTTP ${previewResponse.status}).`);
+        }
+        const previewBlob = await previewResponse.blob();
+        if (previewBlob.size < 1024) throw new Error("O preview final recebido está vazio ou inválido.");
+
+        const localPreviewUrl = URL.createObjectURL(previewBlob);
+        setModelPreviewUrl((current) => {
+          if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+          return localPreviewUrl;
+        });
         setScene((current) => current ? {
           ...current,
           sourceModel: {
@@ -126,7 +146,6 @@ export function MapStudio() {
 
         setGenerationProgress(100);
         setModelStatus("success");
-        await sleep(300);
         setStatus("ready");
         return;
       }
@@ -158,7 +177,7 @@ export function MapStudio() {
     event?.preventDefault();
     setError(null);
     setScene(null);
-    setModelPreviewUrl(null);
+    clearPreviewUrl();
     setModelStatus("idle");
     setGenerationProgress(0);
     setStatus("planning");
