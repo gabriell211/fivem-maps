@@ -11,6 +11,7 @@ type ExportPayload = {
   progress?: number;
   downloadUrl?: string;
   error?: string;
+  detail?: string;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -21,8 +22,11 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const modelStillGenerating = scene?.sourceModel?.status === "pending" || scene?.sourceModel?.status === "running";
+  const busy = state === "queued" || state === "exporting";
+
   async function startExport() {
-    if (!scene) return;
+    if (!scene || modelStillGenerating) return;
     setState("queued");
     setProgress(5);
     setDownloadUrl(null);
@@ -36,7 +40,7 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
       });
       const created = (await createResponse.json()) as ExportPayload;
       if (!createResponse.ok || !created.id) {
-        throw new Error(created.error ?? "Não foi possível iniciar a exportação.");
+        throw new Error(created.error ?? created.detail ?? "Não foi possível iniciar a exportação.");
       }
 
       for (let attempt = 0; attempt < 600; attempt += 1) {
@@ -44,7 +48,7 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
         const statusResponse = await fetch(`/api/export/${encodeURIComponent(created.id)}`, { cache: "no-store" });
         const payload = (await statusResponse.json()) as ExportPayload;
         if (!statusResponse.ok) {
-          throw new Error(payload.error ?? "Falha ao consultar o worker.");
+          throw new Error(payload.error ?? payload.detail ?? "Falha ao consultar o worker.");
         }
 
         setState(payload.status ?? "exporting");
@@ -70,10 +74,18 @@ export function ExportButton({ scene }: { scene: SceneSpec | null }) {
     return <a className="primary-button export-link" href={downloadUrl}>Baixar ZIP FiveM</a>;
   }
 
+  const label = modelStillGenerating
+    ? "Aguardando modelo 3D"
+    : busy
+      ? `Exportando ${progress}%`
+      : scene?.sourceModel?.status === "error"
+        ? "Exportar fallback FiveM"
+        : "Gerar ZIP FiveM";
+
   return (
     <div className="export-control">
-      <button className="primary-button" type="button" onClick={startExport} disabled={!scene || state === "queued" || state === "exporting"}>
-        {state === "queued" || state === "exporting" ? `Exportando ${progress}%` : "Gerar ZIP FiveM"}
+      <button className="primary-button" type="button" onClick={startExport} disabled={!scene || busy || modelStillGenerating}>
+        {label}
       </button>
       {error && <span className="export-error" title={error}>Falhou: {error}</span>}
     </div>
