@@ -13,7 +13,14 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const scene = planScene(body.prompt);
 
-    if (isSloydConfigured()) {
+    if (!isSloydConfigured()) {
+      scene.sourceModel = {
+        provider: "sloyd",
+        jobId: `unconfigured-${scene.id.replace(/-/g, "").slice(0, 24)}`,
+        status: "error",
+        error: "Motor text-to-3D não configurado. Defina SLOYD_CLIENT_ID e SLOYD_CLIENT_SECRET no servidor.",
+      };
+    } else {
       try {
         const { jobId } = await createSloydTextTo3D(scene.prompt);
         scene.sourceModel = {
@@ -25,7 +32,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         const message = error instanceof Error ? error.message : "Falha ao iniciar geração 3D.";
         scene.sourceModel = {
           provider: "sloyd",
-          jobId: `failed-${scene.id.slice(0, 12)}`,
+          jobId: `failed-${scene.id.replace(/-/g, "").slice(0, 24)}`,
           status: "error",
           error: message,
         };
@@ -34,10 +41,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({
       job: {
-        id: scene.sourceModel?.jobId ?? scene.id,
-        status: scene.sourceModel?.status ?? "preview",
-        progress: scene.sourceModel ? 20 : 45,
-        provider: scene.sourceModel?.provider ?? "procedural",
+        id: scene.sourceModel.jobId,
+        status: scene.sourceModel.status,
+        progress: scene.sourceModel.status === "pending" ? 20 : 0,
+        provider: scene.sourceModel.provider,
       },
       scene,
     });
