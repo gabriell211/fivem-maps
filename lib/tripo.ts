@@ -1,4 +1,4 @@
-const TRIPO_BASE_URL = "https://api.tripo3d.ai/v2/openapi";
+const TRIPO_BASE_URL = "https://openapi.tripo3d.ai/v3";
 
 export type TripoStatus = "pending" | "running" | "success" | "error";
 
@@ -14,16 +14,16 @@ export type TripoJob = {
 type TripoTaskResponse = {
   code?: number;
   message?: string;
+  suggestion?: string;
   data?: {
     task_id?: string;
+    type?: string;
     status?: string;
     progress?: number;
-    consumed_credit?: number;
+    credits_consumed?: number;
     output?: {
-      model?: string;
-      pbr_model?: string;
-      base_model?: string;
-      rendered_image?: string;
+      model_url?: string;
+      rendered_image_url?: string;
     };
   };
 };
@@ -31,6 +31,7 @@ type TripoTaskResponse = {
 type TripoBalanceResponse = {
   code?: number;
   message?: string;
+  suggestion?: string;
   data?: {
     balance?: number;
     frozen?: number;
@@ -79,22 +80,37 @@ function textureQuality(): "standard" | "detailed" {
   return process.env.TRIPO_TEXTURE_QUALITY?.trim().toLowerCase() === "detailed" ? "detailed" : "standard";
 }
 
-function parseResponse(payload: TripoTaskResponse): TripoTaskResponse["data"] {
-  if (payload.code !== 0 || !payload.data) {
-    throw new Error(payload.message?.trim() || `Tripo retornou código ${payload.code ?? "desconhecido"}.`);
+function requiredCredits(): number {
+  // Tripo H3.1 Text-to-3D: 20 credits with standard texture, 30 with detailed texture.
+  return textureQuality() === "detailed" ? 30 : 20;
+}
+
+function tripoError(payload: { code?: number; message?: string; suggestion?: string }, httpStatus?: number): Error {
+  const message = payload.message?.trim() ?? "";
+  const insufficient = payload.code === 2010 || /insufficient|not enough credit/i.test(message);
+  if (insufficient) {
+    return new Error(
+      "Saldo da API Tripo insuficiente. Os créditos gratuitos do Tripo Studio são separados dos créditos da API. Adicione créditos de API ou use outro provider.",
+    );
   }
+
+  const suggestion = payload.suggestion?.trim();
+  const detail = [message, suggestion].filter(Boolean).join(" — ");
+  return new Error(detail || `Tripo respondeu HTTP ${httpStatus ?? "desconhecido"}.`);
+}
+
+function parseTaskResponse(payload: TripoTaskResponse): NonNullable<TripoTaskResponse["data"]> {
+  if (payload.code !== 0 || !payload.data) throw tripoError(payload);
   return payload.data;
 }
 
 export async function getTripoBalance(): Promise<{ balance: number; frozen: number }> {
-  const response = await fetch(`${TRIPO_BASE_URL}/user/balance`, {
+  const response = await fetch(`${TRIPO_BASE_URL}/account/balance`, {
     headers: headers(),
     cache: "no-store",
   });
   const payload = (await response.json()) as TripoBalanceResponse;
-  if (!response.ok || payload.code !== 0 || !payload.data) {
-    throw new Error(payload.message?.trim() || `Tripo respondeu HTTP ${response.status}.`);
-  }
+  if (!response.ok || payload.code !== 0 || !payload.data) throw tripoError(payload, response.status);
 
   return {
     balance: Number(payload.data.balance ?? 0),
@@ -103,17 +119,25 @@ export async function getTripoBalance(): Promise<{ balance: number; frozen: numb
 }
 
 export async function createTripoTextTo3D(prompt: string): Promise<{ jobId: string }> {
-  const response = await fetch(`${TRIPO_BASE_URL}/task`, {
+  const { balance } = await getTripoBalance();
+  const minimum = requiredCredits();
+  if (balance < minimum) {
+    throw new Error(
+      `Saldo da API Tripo insuficiente: ${balance} crédito(s) disponível(is), ${minimum} necessários para gerar este modelo texturizado. Créditos do Tripo Studio não podem ser usados pela API.`,
+    );
+  }
+
+  const response = await fetch(`${TRIPO_BASE_URL}/generation/text-to-model`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
-      type: "text_to_model",
-      model_version: modelVersion(),
       prompt: normalizePrompt(prompt),
+      model: modelVersion(),
       negative_prompt: "low quality, blurry, flat facade, floating geometry, pedestal, text labels, people, watermark",
       texture: true,
       pbr: true,
       texture_quality: textureQuality(),
+      geometry_quality: "standard",
       export_uv: true,
       auto_size: true,
       face_limit: normalizeFaceLimit(),
@@ -122,12 +146,10 @@ export async function createTripoTextTo3D(prompt: string): Promise<{ jobId: stri
   });
 
   const payload = (await response.json()) as TripoTaskResponse;
-  if (!response.ok) {
-    throw new Error(payload.message?.trim() || `Tripo respondeu HTTP ${response.status}.`);
-  }
+  if (!response.ok) throw tripoError(payload, response.status);
 
-  const data = parseResponse(payload);
-  if (!data?.task_id) throw new Error("Tripo não retornou task_id.");
+  const data = parseTaskResponse(payload);
+  if (!data.task_id) throw new Error("Tripo não retornou task_id.");
   return { jobId: data.task_id };
 }
 
@@ -142,29 +164,27 @@ function normalizeStatus(status: string | undefined): TripoStatus {
 export async function getTripoJob(jobId: string): Promise<TripoJob> {
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(jobId)) throw new Error("task_id da Tripo inválido.");
 
-  const response = await fetch(`${TRIPO_BASE_URL}/task/${encodeURIComponent(jobId)}`, {
+  const response = await fetch(`${TRIPO_BASE_URL}/tasks/${encodeURIComponent(jobId)}`, {
     headers: headers(),
     cache: "no-store",
   });
   const payload = (await response.json()) as TripoTaskResponse;
-  if (!response.ok) {
-    throw new Error(payload.message?.trim() || `Tripo respondeu HTTP ${response.status}.`);
-  }
+  if (!response.ok) throw tripoError(payload, response.status);
 
-  const data = parseResponse(payload);
-  const status = normalizeStatus(data?.status);
+  const data = parseTaskResponse(payload);
+  const status = normalizeStatus(data.status);
   const progress = status === "success"
     ? 100
-    : Math.max(0, Math.min(99, Math.round(data?.progress ?? 0)));
-  const modelUrl = data?.output?.pbr_model || data?.output?.model;
+    : Math.max(0, Math.min(99, Math.round(data.progress ?? 0)));
+  const modelUrl = data.output?.model_url;
 
   if (status === "success" && !modelUrl) {
     return {
       id: jobId,
       status: "error",
       progress: 100,
-      errorMessage: "A Tripo concluiu a tarefa, mas não retornou um modelo PBR/GLB utilizável.",
-      ...(typeof data?.consumed_credit === "number" ? { consumedCredit: data.consumed_credit } : {}),
+      errorMessage: "A Tripo concluiu a tarefa, mas não retornou um GLB/PBR utilizável.",
+      ...(typeof data.credits_consumed === "number" ? { consumedCredit: data.credits_consumed } : {}),
     };
   }
 
@@ -173,11 +193,11 @@ export async function getTripoJob(jobId: string): Promise<TripoJob> {
     status,
     progress,
     ...(modelUrl ? { modelUrl } : {}),
-    ...(typeof data?.consumed_credit === "number" ? { consumedCredit: data.consumed_credit } : {}),
+    ...(typeof data.credits_consumed === "number" ? { consumedCredit: data.credits_consumed } : {}),
   };
 
   if (status === "error") {
-    return { ...base, errorMessage: `A tarefa Tripo terminou com status '${data?.status ?? "unknown"}'.` };
+    return { ...base, errorMessage: `A tarefa Tripo terminou com status '${data.status ?? "unknown"}'.` };
   }
 
   return base;
