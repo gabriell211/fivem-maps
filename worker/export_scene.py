@@ -1,18 +1,19 @@
-"""Build a SceneSpec in Blender and export a loadable FiveM resource with Sollumz.
+"""Convert a finished textured AI model into a loadable FiveM map resource.
 
 Run from Blender:
   blender --background --python worker/export_scene.py -- scene.json ./output
 
-Requirements:
+Production requirements:
 - Blender 4.2+
 - Sollumz installed and enabled
 - Sollumz native exporter dependencies available
+- SceneSpec with sourceModel.status == "success"
+- Textured GLB with UVs
 """
 from __future__ import annotations
 
 import importlib
 import json
-import math
 import re
 import sys
 import urllib.request
@@ -23,6 +24,7 @@ import bpy
 from mathutils import Vector
 
 MAX_MODEL_BYTES = 180 * 1024 * 1024
+MIN_TEXTURE_EDGE = 1024
 SLOYD_MODEL_BASE = "https://storage.googleapis.com/ai-services-quality/jobs"
 
 
@@ -51,7 +53,7 @@ def verify_sollumz() -> None:
     required = (
         "converttodrawable",
         "autoconvertmaterials",
-        "setallmatembedded",
+        "removeallmatembedded",
         "createytyp",
         "createarchetypefromselected",
         "export_assets",
@@ -66,7 +68,11 @@ def verify_sollumz() -> None:
 def find_sollumz_module_root() -> str:
     candidates: list[str] = []
     for module_name in list(sys.modules):
-        if module_name in {"sollumz", "sollumz_dev"} or module_name.endswith(".sollumz") or module_name.endswith(".sollumz_dev"):
+        if (
+            module_name in {"sollumz", "sollumz_dev"}
+            or module_name.endswith(".sollumz")
+            or module_name.endswith(".sollumz_dev")
+        ):
             candidates.append(module_name)
     for module_name in sorted(candidates, key=len):
         try:
@@ -77,53 +83,10 @@ def find_sollumz_module_root() -> str:
     raise RuntimeError("Não foi possível localizar o módulo Python do Sollumz carregado.")
 
 
-def hex_to_rgba(value: str) -> tuple[float, float, float, float]:
-    clean = value.lstrip("#")
-    if len(clean) != 6:
-        return (0.5, 0.5, 0.5, 1.0)
-    try:
-        return tuple(int(clean[i : i + 2], 16) / 255 for i in (0, 2, 4)) + (1.0,)
-    except ValueError:
-        return (0.5, 0.5, 0.5, 1.0)
-
-
-def material_for(name: str, color: str) -> bpy.types.Material:
-    material = bpy.data.materials.get(name) or bpy.data.materials.new(name)
-    material.diffuse_color = hex_to_rgba(color)
-    material.use_nodes = True
-    principled = material.node_tree.nodes.get("Principled BSDF") if material.node_tree else None
-    if principled:
-        principled.inputs["Base Color"].default_value = material.diffuse_color
-        principled.inputs["Roughness"].default_value = 0.72
-    return material
-
-
-def add_mesh(item: dict[str, Any]) -> bpy.types.Object:
-    primitive = item.get("primitive", "box")
-    if primitive == "cylinder":
-        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=0.5, depth=1)
-    elif primitive == "sphere":
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=0.5)
-    elif primitive == "plane":
-        bpy.ops.mesh.primitive_plane_add(size=1)
-    else:
-        bpy.ops.mesh.primitive_cube_add(size=1)
-
-    mesh = bpy.context.active_object
-    if mesh is None or mesh.type != "MESH":
-        raise RuntimeError("Blender não criou a geometria procedural esperada.")
-    mesh.name = safe_asset_name(item.get("name") or item.get("id") or "generated_asset")
-    mesh.location = tuple(float(v) for v in item.get("position", [0, 0, 0]))
-    mesh.rotation_euler = tuple(math.radians(float(v)) for v in item.get("rotation", [0, 0, 0]))
-    mesh.scale = tuple(float(v) for v in item.get("scale", [1, 1, 1]))
-    mesh.data.materials.append(material_for(str(item.get("material") or "generated"), str(item.get("color") or "#808080")))
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    return mesh
-
-
-def download_sloyd_glb(source: dict[str, Any], directory: Path) -> Path | None:
+def download_sloyd_glb(source: dict[str, Any], directory: Path) -> Path:
     if source.get("provider") != "sloyd" or source.get("status") != "success":
-        return None
+        raise RuntimeError("A exportação final exige um modelo 3D Sloyd concluído.")
+
     job_id = str(source.get("jobId") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", job_id):
         raise RuntimeError("jobId do modelo Sloyd é inválido.")
@@ -145,7 +108,7 @@ def download_sloyd_glb(source: dict[str, Any], directory: Path) -> Path | None:
     except Exception as exc:
         raise RuntimeError(f"Falha ao baixar o GLB gerado: {exc}") from exc
 
-    if path.stat().st_size < 1024:
+    if not path.exists() or path.stat().st_size < 1024:
         raise RuntimeError("GLB gerado está vazio ou inválido.")
     return path
 
@@ -161,11 +124,55 @@ def import_glb(path: Path) -> list[bpy.types.Object]:
     return meshes
 
 
-def build_procedural_meshes(scene: dict[str, Any]) -> list[bpy.types.Object]:
-    meshes = [add_mesh(item) for item in scene.get("objects", []) if item.get("kind") != "light"]
-    if not meshes:
-        raise RuntimeError("SceneSpec não possui geometria para exportar.")
-    return meshes
+def images_from_material(material: bpy.types.Material | None) -> list[bpy.types.Image]:
+    if material is None or not material.use_nodes or material.node_tree is None:
+        return []
+    images: list[bpy.types.Image] = []
+    for node in material.node_tree.nodes:
+        if isinstance(node, bpy.types.ShaderNodeTexImage) and node.image and node.image not in images:
+            images.append(node.image)
+    return images
+
+
+def images_from_mesh(mesh: bpy.types.Object) -> list[bpy.types.Image]:
+    images: list[bpy.types.Image] = []
+    for material in mesh.data.materials:
+        for image in images_from_material(material):
+            if image not in images:
+                images.append(image)
+    return images
+
+
+def validate_textured_source(meshes: list[bpy.types.Object]) -> None:
+    total_polygons = 0
+    all_images: list[bpy.types.Image] = []
+    textured_meshes = 0
+
+    for mesh in meshes:
+        total_polygons += len(mesh.data.polygons)
+        images = images_from_mesh(mesh)
+        if images:
+            textured_meshes += 1
+            if not mesh.data.uv_layers:
+                raise RuntimeError(f"A malha '{mesh.name}' possui texturas, mas não possui UV map.")
+            for image in images:
+                if image not in all_images:
+                    all_images.append(image)
+
+    if total_polygons < 100:
+        raise RuntimeError("O modelo 3D final possui geometria insuficiente para ser considerado um mapa detalhado.")
+    if textured_meshes == 0 or not all_images:
+        raise RuntimeError("O modelo 3D final veio sem texturas. A exportação foi bloqueada.")
+
+    invalid_images = [image.name for image in all_images if min(int(image.size[0]), int(image.size[1])) <= 0]
+    if invalid_images:
+        raise RuntimeError(f"Texturas inválidas/vazias: {', '.join(invalid_images[:8])}")
+
+    largest_edge = max(max(int(image.size[0]), int(image.size[1])) for image in all_images)
+    if largest_edge < MIN_TEXTURE_EDGE:
+        raise RuntimeError(
+            f"As texturas do modelo estão abaixo de {MIN_TEXTURE_EDGE}px. Gere novamente em qualidade 1K/2K/4K."
+        )
 
 
 def join_meshes(meshes: list[bpy.types.Object], name: str) -> bpy.types.Object:
@@ -209,9 +216,9 @@ def target_model_dimensions(scene: dict[str, Any]) -> tuple[float, float, float]
 
 
 def normalize_generated_mesh(mesh: bpy.types.Object, scene: dict[str, Any]) -> None:
-    """Normalize arbitrary text-to-3D units to the planner's GTA-scale envelope."""
-    bpy.context.view_layer.objects.active = mesh
+    bpy.ops.object.select_all(action="DESELECT")
     mesh.select_set(True)
+    bpy.context.view_layer.objects.active = mesh
     bpy.context.view_layer.update()
 
     source_dimensions = tuple(max(0.0001, abs(float(v))) for v in mesh.dimensions)
@@ -236,18 +243,48 @@ def normalize_generated_mesh(mesh: bpy.types.Object, scene: dict[str, Any]) -> N
     bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
 
 
-def prepare_materials(mesh: bpy.types.Object) -> None:
+def prepare_gta_materials(mesh: bpy.types.Object) -> list[bpy.types.Image]:
     if not mesh.data.materials:
-        mesh.data.materials.append(material_for("generated", "#808080"))
+        raise RuntimeError("O modelo final não possui materiais.")
+
     bpy.ops.object.select_all(action="DESELECT")
     mesh.select_set(True)
     bpy.context.view_layer.objects.active = mesh
+
     result = bpy.ops.sollumz.autoconvertmaterials()
     if "FINISHED" not in result:
-        raise RuntimeError("Sollumz falhou ao converter os materiais para shaders GTA V.")
-    result = bpy.ops.sollumz.setallmatembedded()
+        raise RuntimeError("Sollumz falhou ao converter materiais PBR para shaders GTA V.")
+
+    images = images_from_mesh(mesh)
+    if not images:
+        raise RuntimeError("Os shaders GTA foram criados sem nenhuma textura utilizável.")
+
+    for image in images:
+        if image.packed_file is None:
+            try:
+                image.pack()
+            except RuntimeError as exc:
+                raise RuntimeError(f"Não foi possível empacotar a textura '{image.name}': {exc}") from exc
+
+    result = bpy.ops.sollumz.removeallmatembedded()
     if "FINISHED" not in result:
-        raise RuntimeError("Sollumz falhou ao marcar as texturas como embutidas.")
+        raise RuntimeError("Sollumz falhou ao preparar as texturas para o YTD.")
+
+    return images
+
+
+def create_texture_dictionary(images: list[bpy.types.Image], name: str) -> str:
+    txds = getattr(bpy.context.scene, "sz_txds", None)
+    if txds is None:
+        raise RuntimeError("Sistema YTD do Sollumz não está disponível.")
+
+    txd_name = f"{name}_textures"
+    txd = txds.new_texture_dictionary(txd_name)
+    for image in images:
+        txd.new_texture(image)
+    if not txd.textures:
+        raise RuntimeError("O YTD foi criado sem texturas.")
+    return txd_name
 
 
 def convert_to_drawable(mesh: bpy.types.Object, name: str) -> bpy.types.Object:
@@ -267,12 +304,13 @@ def convert_to_drawable(mesh: bpy.types.Object, name: str) -> bpy.types.Object:
     return drawable
 
 
-def create_ytyp(drawable: bpy.types.Object, name: str) -> None:
+def create_ytyp(drawable: bpy.types.Object, name: str, texture_dictionary: str) -> None:
     result = bpy.ops.sollumz.createytyp()
     if "FINISHED" not in result:
         raise RuntimeError("Falha ao criar YTYP.")
     if not bpy.context.scene.ytyps:
         raise RuntimeError("YTYP não foi registrado na cena.")
+
     ytyp = bpy.context.scene.ytyps[bpy.context.scene.ytyp_index]
     ytyp.name = name
     bpy.context.scene.create_archetype_type = "sollumz_archetype_base"
@@ -283,6 +321,13 @@ def create_ytyp(drawable: bpy.types.Object, name: str) -> None:
     result = bpy.ops.sollumz.createarchetypefromselected()
     if "FINISHED" not in result or not ytyp.archetypes:
         raise RuntimeError("Falha ao criar archetype do Drawable no YTYP.")
+
+    archetype = ytyp.archetypes.active_item
+    if archetype is None:
+        raise RuntimeError("Archetype ativo não foi criado.")
+    archetype.texture_dictionary = texture_dictionary
+    archetype.hd_texture_dist = 120.0
+    archetype.lod_dist = 350.0
 
 
 def apply_world_position(drawable: bpy.types.Object, scene: dict[str, Any]) -> None:
@@ -318,7 +363,7 @@ def create_current_ymap(drawable: bpy.types.Object, name: str) -> None:
     entity.rotation = rotation
     entity.scale_xy = scale.x
     entity.scale_z = scale.z
-    entity.lod_dist = -1.0
+    entity.lod_dist = 350.0
     group.entities.select(0)
 
     updated = extents_module.update_maps_extents(group, [map_data.uuid])
@@ -342,12 +387,12 @@ def export_native_assets(output_dir: Path) -> None:
         export_ytyps_include="ALL",
         export_ymaps=True,
         export_ymaps_include="ALL",
-        export_ytds=False,
+        export_ytds=True,
         export_ytds_include="ALL",
     )
     if "FINISHED" not in result:
         raise RuntimeError(
-            "Sollumz falhou ao exportar NATIVE/GEN8. Confirme que as dependências do exportador binário estão instaladas."
+            "Sollumz falhou ao exportar NATIVE/GEN8. Confirme PyMateria e as dependências do exportador binário."
         )
 
 
@@ -355,7 +400,7 @@ def collect_native_files(output_dir: Path) -> list[Path]:
     extensions = {".ydr", ".ybn", ".ytd", ".ytyp", ".ymap"}
     files = [p for p in output_dir.rglob("*") if p.is_file() and p.suffix.lower() in extensions]
     produced = {p.suffix.lower() for p in files}
-    required = {".ydr", ".ytyp", ".ymap"}
+    required = {".ydr", ".ytd", ".ytyp", ".ymap"}
     missing = sorted(required - produced)
     if missing:
         raise RuntimeError(f"Exportação incompleta: arquivos obrigatórios ausentes: {', '.join(missing)}")
@@ -377,7 +422,7 @@ def package_resource(scene: dict[str, Any], output_dir: Path, files: list[Path])
         "fx_version 'cerulean'\n"
         "game 'gta5'\n\n"
         "author 'FiveM Map Forge'\n"
-        "description 'AI-generated FiveM map'\n"
+        "description 'AI-generated textured FiveM map'\n"
         "version '1.0.0'\n"
         "this_is_a_map 'yes'\n",
         encoding="utf-8",
@@ -393,15 +438,19 @@ def export_scene(scene: dict[str, Any], output_dir: Path) -> None:
     name = safe_asset_name(scene.get("name"))
 
     source = scene.get("sourceModel")
-    glb_path = download_sloyd_glb(source, output_dir) if isinstance(source, dict) else None
-    using_generated_model = glb_path is not None
-    meshes = import_glb(glb_path) if glb_path else build_procedural_meshes(scene)
+    if not isinstance(source, dict) or source.get("status") != "success":
+        raise RuntimeError("SceneSpec não possui modelo 3D final pronto. Blockout não pode ser exportado.")
+
+    glb_path = download_sloyd_glb(source, output_dir)
+    meshes = import_glb(glb_path)
+    validate_textured_source(meshes)
     mesh = join_meshes(meshes, name)
-    if using_generated_model:
-        normalize_generated_mesh(mesh, scene)
-    prepare_materials(mesh)
+    normalize_generated_mesh(mesh, scene)
+
+    images = prepare_gta_materials(mesh)
+    texture_dictionary = create_texture_dictionary(images, name)
     drawable = convert_to_drawable(mesh, name)
-    create_ytyp(drawable, name)
+    create_ytyp(drawable, name, texture_dictionary)
     apply_world_position(drawable, scene)
     create_current_ymap(drawable, name)
 
