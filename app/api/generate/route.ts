@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { planScene } from "@/lib/planner";
-import { createTripoTextTo3D, isTripoConfigured } from "@/lib/tripo";
+import { createMapForgeGeneration, isMapForgeAIConfigured } from "@/lib/mapforge-ai";
 
 export const runtime = "nodejs";
 
@@ -18,27 +18,28 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const scene = planScene(prompt);
 
-    if (!isTripoConfigured()) {
+    if (!isMapForgeAIConfigured()) {
       scene.sourceModel = {
-        provider: "tripo",
+        provider: "mapforge",
         jobId: `unconfigured-${scene.id.replace(/-/g, "").slice(0, 24)}`,
         status: "error",
         progress: 0,
-        error: "Tripo não configurado. Defina TRIPO_API_KEY no ambiente do servidor.",
+        error: "Map Forge AI ainda não está conectado. Configure MAP_FORGE_AI_URL no servidor web.",
       };
     } else {
       try {
-        const { jobId } = await createTripoTextTo3D(scene.prompt);
+        const job = await createMapForgeGeneration(scene.prompt);
         scene.sourceModel = {
-          provider: "tripo",
-          jobId,
-          status: "pending",
-          progress: 0,
+          provider: "mapforge",
+          jobId: job.id,
+          status: job.status,
+          progress: job.progress,
+          ...(job.stage ? { stage: job.stage } : {}),
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Falha ao iniciar geração 3D na Tripo.";
+        const message = error instanceof Error ? error.message : "Falha ao iniciar o Map Forge AI.";
         scene.sourceModel = {
-          provider: "tripo",
+          provider: "mapforge",
           jobId: `failed-${scene.id.replace(/-/g, "").slice(0, 24)}`,
           status: "error",
           progress: 0,
