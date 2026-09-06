@@ -1,34 +1,36 @@
-import { getTripoJob, isTripoConfigured } from "@/lib/tripo";
+import { fetchMapForgeModel, getMapForgeGeneration, isMapForgeAIConfigured } from "@/lib/mapforge-ai";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  if (!isTripoConfigured()) return new Response("Tripo não configurado.", { status: 503 });
+  if (!isMapForgeAIConfigured()) return new Response("Map Forge AI não configurado.", { status: 503 });
 
   try {
     const { id } = await context.params;
-    const job = await getTripoJob(id);
-    if (job.status !== "success" || !job.modelUrl) {
+    const job = await getMapForgeGeneration(id);
+    if (job.status !== "success") {
       return new Response("Modelo ainda não está pronto.", { status: 409 });
     }
 
-    const upstream = await fetch(job.modelUrl, { cache: "no-store" });
+    const upstream = await fetchMapForgeModel(id);
     if (!upstream.ok || !upstream.body) {
-      return new Response("Modelo gerado não pôde ser baixado da Tripo.", { status: 502 });
+      return new Response("O modelo final não pôde ser baixado do Map Forge AI.", { status: 502 });
     }
 
     return new Response(upstream.body, {
       status: 200,
       headers: {
         "Content-Type": upstream.headers.get("content-type") ?? "model/gltf-binary",
-        "Cache-Control": "private, max-age=240",
+        "Content-Length": upstream.headers.get("content-length") ?? "",
+        "Cache-Control": "private, max-age=300",
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Falha ao carregar modelo Tripo.";
+    const message = error instanceof Error ? error.message : "Falha ao carregar modelo do Map Forge AI.";
     return new Response(message, { status: 502 });
   }
 }
