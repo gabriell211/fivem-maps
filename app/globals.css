@@ -58,6 +58,10 @@ body { min-width: 320px; }
 .pipeline-steps span.active { color: #8eeaf7; border-color: #2a7890; background: rgba(39, 142, 166, .12); }
 .preview-shell { position: relative; min-height: 460px; overflow: hidden; border-radius: 16px; border: 1px solid #182b3d; background: #071019; box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 24px 60px rgba(0,0,0,.22); }
 .preview-shell canvas { display: block; }
+.blockout-banner { position: absolute; left: 18px; right: 18px; bottom: 18px; z-index: 6; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid rgba(244, 180, 70, .42); border-radius: 12px; background: rgba(21, 15, 7, .88); backdrop-filter: blur(14px); box-shadow: 0 16px 42px rgba(0,0,0,.35); }
+.blockout-banner span { color: #f4b446; font-size: 10px; font-weight: 900; letter-spacing: .13em; }
+.blockout-banner strong { color: #fff0c9; font-size: 12px; white-space: nowrap; }
+.blockout-banner small { color: #b7a98a; font-size: 11px; line-height: 1.4; }
 .preview-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; padding: 24px; }
 .preview-empty strong { margin-top: 9px; font-size: 24px; }
 .preview-empty p { max-width: 430px; margin: 8px auto 0; color: #71869a; font-size: 13px; line-height: 1.5; }
@@ -77,6 +81,7 @@ body { min-width: 320px; }
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 320px minmax(0, 1fr); }
   .pipeline-list { grid-template-columns: 1fr 1fr; }
+  .blockout-banner { grid-template-columns: 1fr; gap: 5px; }
 }
 @media (max-width: 780px) {
   .topbar { height: auto; min-height: 64px; padding: 12px 16px; align-items: flex-start; }
