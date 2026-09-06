@@ -17,10 +17,11 @@ export const SceneObjectSchema = v.object({
 });
 
 export const SourceModelSchema = v.object({
-  provider: v.picklist(["tripo", "trellis", "sloyd"]),
+  provider: v.picklist(["mapforge", "tripo", "trellis", "sloyd"]),
   jobId: v.string(),
   status: v.picklist(["pending", "running", "success", "error"]),
   progress: v.optional(v.number()),
+  stage: v.optional(v.string()),
   url: v.optional(v.string()),
   error: v.optional(v.string()),
 });
