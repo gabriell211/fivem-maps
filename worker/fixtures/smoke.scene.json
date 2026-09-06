@@ -1,0 +1,27 @@
+{
+  "id": "smoke-test-scene",
+  "name": "map_forge_smoke",
+  "prompt": "small concrete test platform",
+  "style": "industrial",
+  "spawn": [0, 0, 1],
+  "objects": [
+    {
+      "id": "platform",
+      "name": "platform",
+      "kind": "building",
+      "primitive": "box",
+      "position": [0, 0, 1],
+      "rotation": [0, 0, 0],
+      "scale": [8, 8, 2],
+      "color": "#777777",
+      "material": "concrete",
+      "collision": true
+    }
+  ],
+  "metadata": {
+    "estimatedEntities": 1,
+    "estimatedDrawCalls": 1,
+    "hasInterior": false,
+    "generatedAt": "2026-09-06T00:00:00.000Z"
+  }
+}
